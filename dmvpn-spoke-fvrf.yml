@@ -1,0 +1,77 @@
+hostname {{ hostname }}
+
+vrf definition {{ fvrf_name }}
+ rd 65000:{{ fvrf_id }}
+ address-family ipv4
+ exit-address-family
+!
+crypto ikev2 proposal DMVPN_PROPOSAL
+ encryption aes-gcm-256
+ integrity null
+ group 21
+!
+crypto ikev2 policy DMVPN_POLICY
+ proposal DMVPN_PROPOSAL
+!
+crypto ikev2 keyring DMVPN_KEYRING
+ peer {{ hub1_name }}
+  address {{ hub1_public_ip }}
+  pre-shared-key local {{ ikev2_psk }}
+  pre-shared-key remote {{ ikev2_psk }}
+ peer {{ hub2_name }}
+  address {{ hub2_public_ip }}
+  pre-shared-key local {{ ikev2_psk }}
+  pre-shared-key remote {{ ikev2_psk }}
+!
+crypto ikev2 profile DMVPN_PROFILE
+ match identity remote address {{ hub1_public_ip }} {{ hub2_public_ip }} 
+ authentication local pre-share
+ authentication remote pre-share
+ keyring local DMVPN_KEYRING
+ dpd 10 3 on-demand
+!
+crypto ipsec transform-set DMVPN_TRANSFORM esp-gcm 256 mode transport
+!
+crypto ipsec profile DMVPN_PROFILE
+ set transform-set DMVPN_TRANSFORM
+ set ikev2-profile DMVPN_PROFILE
+!
+interface Tunnel0
+ description DMVPN SPOKE TUNNEL
+ bandwidth 100000
+ ip address {{ tunnel_ip }} {{ tunnel_mask }}
+ ip mtu 1400
+ ip nhrp network-id {{ nhrp_id }}
+ ip nhrp nhs {{ hub1_tunnel_ip }} nbma {{ hub1_public_ip }} multicast
+ ip nhrp nhs {{ hub2_tunnel_ip }} nbma {{ hub2_public_ip }} multicast
+ ip nhrp shortcut
+ ip nhrp redirect
+ ip nhrp authentication {{ nhrp_auth }}
+ ip tcp adjust-mss 1360
+ ip eigrp 100 bandwidth-percent 50
+ ip authentication mode eigrp 100 md5
+ ip authentication key-chain eigrp 100 EIGRP_KEYS
+ tunnel source GigabitEthernet0/0/0
+ tunnel mode gre multipoint
+ tunnel key {{ tunnel_key }}
+ tunnel protection ipsec profile DMVPN_PROFILE
+!
+interface GigabitEthernet0/0/0
+ description Public WAN Interface
+ vrf forwarding {{ fvrf_name }}
+ ip address dhcp
+!
+router eigrp 100
+ address-family ipv4 unicast autonomous-system 100
+  network {{ tunnel_ip }} 0.0.0.255
+  neighbor {{ hub1_tunnel_ip }} 
+  neighbor {{ hub2_tunnel_ip }} 
+  eigrp router-id {{ router_id }}
+  authentication mode md5
+  authentication key-chain EIGRP_KEYS
+ exit-address-family
+!
+key chain EIGRP_KEYS
+ key 1
+  key-string {{ eigrp_key }}
+!
